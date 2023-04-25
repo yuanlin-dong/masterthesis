@@ -5,7 +5,7 @@
 # Date          What
 # 2023-04-20    added a couple of functions created to replace logics in the main file zero_rate_model.py
 # 2023-04-25    added two functions - one for importing and process all historical data, another for the historical calibration
-
+# 2023-04-25    added two functions for processing nok ir data as it has a different structure to the euro ir data
 
 import csv
 from csv import DictReader
@@ -63,8 +63,8 @@ def create_df_sr_all(dirs, filepath):
 
 def create_df_sr_current(dirs, filepath):
     header = []
-    latest_value = []
-    latest_date = []
+    value = []
+    date = []
     for filename in dirs:
         if '.csv' in filename:
             # print(filename)
@@ -73,10 +73,10 @@ def create_df_sr_current(dirs, filepath):
             b = temp[1]
             c = [b[0]]*(len(b) - 1)
             header.extend(a[1:len(a)])
-            latest_value.extend(b[1:len(b)])
-            latest_date.extend(c)
+            value.extend(b[1:len(b)])
+            date.extend(c)
 
-    temp_sr = pd.DataFrame(np.column_stack([header, latest_date, latest_value]), columns=['header', 'latest_date', 'latest_value'])
+    temp_sr = pd.DataFrame(np.column_stack([header, date, value]), columns=['header', 'date', 'value'])
     temp_sr['tt'] = temp_sr['header'].str[29:len(temp_sr['header'])-28]
     temp_est = temp_sr[temp_sr['header'] == 'EST.B.EU000A2X2A25.WT'] ### obtain ester data
     temp_sr = temp_sr[temp_sr['tt'].str[0:3] == 'SR_'] ### remove spread data
@@ -92,7 +92,7 @@ def create_df_sr_current(dirs, filepath):
 
     temp_est['tenor'] = 1
 
-    result = pd.concat([temp_est[['latest_date', 'latest_value', 'tenor']], temp_sr[['latest_date', 'latest_value', 'tenor']]])
+    result = pd.concat([temp_est[['date', 'value', 'tenor']], temp_sr[['date', 'value', 'tenor']]])
 
     result = result.sort_values(by=['tenor'])
 
@@ -102,8 +102,8 @@ def create_df_sr_current_daily(df_sr_current):
     temp = pd.DataFrame(list(range(1,10801)), columns=['tenor'])
     temp1 = temp.merge(df_sr_current,on='tenor', how='left')
 
-    temp1['latest_value'] = pd.to_numeric(temp1['latest_value'], errors='coerce')
-    temp1['latest_value'] = temp1['latest_value'].interpolate(method='linear', limit_direction='forward', axis=0)
+    temp1['value'] = pd.to_numeric(temp1['value'], errors='coerce')
+    temp1['value'] = temp1['value'].interpolate(method='linear', limit_direction='forward', axis=0)
 
     result = temp1
     return result
@@ -115,11 +115,11 @@ def create_df_fr_current(step_list, tenor_list, df_sr_current_daily):
     temp = temp.drop(columns=['tenor'])
 
     temp = temp.merge(df_sr_current_daily, left_on='forward_start', right_on='tenor', how='left')
-    temp = temp.rename(columns={"latest_value": "forward_start_rate"})
-    temp = temp.drop(columns=['tenor', 'latest_date'])
+    temp = temp.rename(columns={"value": "forward_start_rate"})
+    temp = temp.drop(columns=['tenor', 'date'])
     temp = temp.merge(df_sr_current_daily, left_on='forward_end', right_on='tenor', how='left')
-    temp = temp.rename(columns={"latest_value": "forward_end_rate"})
-    temp = temp.drop(columns=['tenor', 'latest_date'])
+    temp = temp.rename(columns={"value": "forward_end_rate"})
+    temp = temp.drop(columns=['tenor', 'date'])
     temp['forward_start_rate'] = temp['forward_start_rate'].fillna(0)
     temp['forward_end_rate'] = temp['forward_end_rate'].fillna(0)
     temp['forward rate'] = (temp['forward_end']*temp['forward_end_rate'] - temp['forward_start']*temp['forward_start_rate'])/(temp['forward_end'] - temp['forward_start'])
@@ -137,7 +137,7 @@ def estimate_mrl(df_fr_current, tenor_list, kappa):
     temp1['forward rate lag'] = temp1['forward rate'].shift(1)
     temp1['step lag'] = temp1['step'].shift(1)
     temp1 = temp1[temp1['step'] > 0]
-    temp1['MRL'] = ((np.exp(temp1['kappa'])*(temp1['step'] - temp1['step lag']))*temp1['forward rate'] - temp1['forward rate lag'])/(np.exp(temp1['kappa'])*(temp1['step'] - temp1['step lag']))
+    temp1['mrl'] = ((np.exp(temp1['kappa'])*(temp1['step'] - temp1['step lag']))*temp1['forward rate'] - temp1['forward rate lag'])/(np.exp(temp1['kappa'])*(temp1['step'] - temp1['step lag']))
 
     result = temp1
     return result
@@ -179,3 +179,29 @@ def historical_calibration(df_sr_selected):
     result["sigma"] = np.sqrt((2 * result["kappa"] - (result["kappa"] ** 2) / 255) * result["var"] / result["N_1"])
 
     return result
+
+def TENOR_2_tenor_norway(x):
+    if "Y" in x:
+        tenor = pd.to_numeric(x[0:len(x)-1], errors='coerce')*360
+    elif "M" in x:
+        tenor = pd.to_numeric(x[0:len(x)-1], errors='coerce')*30
+    return tenor
+
+def create_df_sr_all_norway(filepath, filename, filename_nowa, spot_date):
+    file = filepath + filename
+    df_sr = pd.read_csv(file, delimiter=";")
+    df_sr["tenor"] = df_sr["TENOR"].apply(TENOR_2_tenor_norway)
+    df_sr = df_sr[["TIME_PERIOD", "tenor", "OBS_VALUE"]]
+    df_sr.rename(columns={"TIME_PERIOD": "date", "OBS_VALUE": "value"}, inplace=True)
+
+    file_nowa = filepath + filename_nowa
+    df_nowa = pd.read_csv(file_nowa, delimiter=";")
+    df_nowa = df_nowa[["TIME_PERIOD", "OBS_VALUE"]]
+    df_nowa.rename(columns={"TIME_PERIOD": "date", "OBS_VALUE": "value"}, inplace=True)
+    df_nowa["tenor"] = 1
+
+    df_sr_all = pd.concat([df_sr, df_nowa], ignore_index=True)
+    df_sr_all = df_sr_all.loc[df_sr_all["date"] <= spot_date]
+    df_sr_all.sort_values(by=["date", "tenor"], inplace=True)
+
+    return df_sr_all

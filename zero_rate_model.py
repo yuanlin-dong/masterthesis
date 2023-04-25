@@ -7,6 +7,7 @@
 #               place the list of functions into the file functions.py,
 #               and call those functions in this file
 # 2023-04-25    add the historical calibration of mrr and volatility, hence to remove the shortcuts made
+# 2023-04-25    update the tenor_list to be consistent with nok ir data
 
 
 ###a refresh to clear all variables before running the script###
@@ -37,7 +38,7 @@ filepath_out = '/Users/yuanlindong/Documents/python/masterthesis/output/'
 dirs = os.listdir(filepath)
 
 ## list of tenors to be modelled
-tenor_list = [1,90,180,360,720,1440,3960]
+tenor_list = [1,180,270,360,720,1440,3600]
 ## list of time steps
 step_list = [0,90,180,360]
 
@@ -68,8 +69,8 @@ df_fr_current = create_df_fr_current(step_list, tenor_list, df_sr_current_daily)
 df_mrl_estimated = estimate_mrl(df_fr_current, tenor_list, kappa)
 
 # 4. export data to excel for further analysis
-df_2_excel(df_euro_sr_historical_calibration, filepath_out, "mrr_volatility_estimated")
-df_2_excel(df_mrl_estimated, filepath_out, "mrl_estimated")
+df_2_excel(df_euro_sr_historical_calibration, filepath_out, "euro_mrr_volatility_estimated")
+df_2_excel(df_mrl_estimated, filepath_out, "euro_mrl_estimated")
 
 
 
