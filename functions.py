@@ -4,6 +4,7 @@
 # Log of changes:
 # Date          What
 # 2023-04-20    added a couple of functions created to replace logics in the main file zero_rate_model.py
+# 2023-04-25    added two functions - one for importing and process all historical data, another for the historical calibration
 
 
 import csv
@@ -20,6 +21,45 @@ def infile_2_list(filepath, filename):
         for line in csv.reader(f):
             python_list.append(line)
     return python_list
+
+def create_df_sr_all(dirs, filepath):
+    header = []
+    value = []
+    date = []
+    for filename in dirs:
+        if '.csv' in filename:
+            print(filename)
+            temp = infile_2_list(filepath, filename)
+            a = temp[0]
+            for i in range(1, len(temp)):
+                b = temp[i]
+                c = [b[0]]*(len(b) - 1)
+                header.extend(a[1:len(a)])
+                value.extend(b[1:len(b)])
+                date.extend(c)
+
+    temp_sr = pd.DataFrame(np.column_stack([header, date, value]), columns=['header', 'date', 'value'])
+    temp_sr['tt'] = temp_sr['header'].str[29:len(temp_sr['header'])-28]
+    temp_est = temp_sr[temp_sr['header'] == 'EST.B.EU000A2X2A25.WT'] ### obtain ester data
+    temp_sr = temp_sr[temp_sr['tt'].str[0:3] == 'SR_'] ### remove spread data
+
+    ### derive the tenor from the header data
+    temp_sr['tenor_text'] = temp_sr['tt'].str[3:len(temp_sr['tt'])-3]
+    temp_sr['ccc'] = temp_sr['tenor_text'].str.find('Y')
+    temp_sr['tenor_year'] = temp_sr.apply(lambda x: x['tenor_text'][0:max(0,x['ccc'])], 1)
+    temp_sr['tenor_month'] = temp_sr.apply(lambda x: x['tenor_text'][x['ccc'] + 1:len(x['tenor_text'])-1], 1)
+    temp_sr['tenor_year'] = pd.to_numeric(temp_sr['tenor_year'], errors='coerce').fillna(0).astype('int64')
+    temp_sr['tenor_month'] = pd.to_numeric(temp_sr['tenor_month'], errors='coerce').fillna(0).astype('int64')
+    temp_sr['tenor'] = temp_sr['tenor_year']*360 + temp_sr['tenor_month']*30
+
+    temp_est['tenor'] = 1
+
+    result = pd.concat([temp_est[['date', 'value', 'tenor']], temp_sr[['date', 'value', 'tenor']]])
+
+    result['value'] = pd.to_numeric(result['value'], errors='coerce')
+    result = result.sort_values(by=['tenor', 'date'])
+
+    return result
 
 def create_df_sr_current(dirs, filepath):
     header = []
@@ -106,3 +146,36 @@ def df_2_excel(df_name, filepath, filename):
     # filename_out = "current_spot_rate.xlsx"
     file_out = filepath + filename + ".xlsx"
     df_name.to_excel(file_out)
+
+def historical_calibration(df_sr_selected):
+    df_sr_selected.sort_values(by=['tenor', 'date'], inplace=True)
+    df_sr_selected['tenor lag'] = df_sr_selected['tenor'].shift(1)
+    df_sr_selected['value lag'] = df_sr_selected['value'].shift(1)
+
+    auto_covar = df_sr_selected.loc[df_sr_selected['tenor lag'] == df_sr_selected['tenor']]
+    auto_covar['auto covar'] = (auto_covar['value'] - auto_covar['value lag']) ** 2
+
+    a = pd.DataFrame(df_sr_selected['value'].groupby(df_sr_selected['tenor']).mean())
+    a.reset_index(inplace=True)
+    a.rename(columns={"value": "a"}, inplace=True)
+
+    var = df_sr_selected.merge(a, on="tenor", how="left")
+    var["var"] = (var["value"] - var["a"]) ** 2
+
+    var_sum = pd.DataFrame(var['var'].groupby(var['tenor']).sum())
+    var_sum.reset_index(inplace=True)
+
+    auto_covar_sum = pd.DataFrame(auto_covar["auto covar"].groupby(auto_covar["tenor"]).sum())
+    auto_covar_sum.reset_index(inplace=True)
+
+    kappa = var_sum.merge(auto_covar_sum, on="tenor", how="left")
+    kappa["kappa"] = (1 / (2 * 1 / 255)) * kappa["auto covar"] / kappa["var"]
+
+    N_1 = pd.DataFrame(auto_covar["date"].groupby(auto_covar["tenor"]).count())
+    N_1.reset_index(inplace=True)
+    N_1.rename(columns={"date": "N_1"}, inplace=True)
+
+    result = kappa.merge(N_1, on="tenor", how="left")
+    result["sigma"] = np.sqrt((2 * result["kappa"] - (result["kappa"] ** 2) / 255) * result["var"] / result["N_1"])
+
+    return result
