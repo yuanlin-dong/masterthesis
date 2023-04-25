@@ -71,6 +71,7 @@ df_mrl_estimated = estimate_mrl(df_fr_current, tenor_list, kappa)
 # 4. export data to excel for further analysis
 df_2_excel(df_euro_sr_historical_calibration, filepath_out, "euro_mrr_volatility_estimated")
 df_2_excel(df_mrl_estimated, filepath_out, "euro_mrl_estimated")
+df_2_excel(df_sr_current_daily, filepath_out, "euro_sr_current")
 
 
 
