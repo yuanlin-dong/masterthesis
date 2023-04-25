@@ -6,7 +6,7 @@
 # 2023-04-20    added a couple of functions created to replace logics in the main file zero_rate_model.py
 # 2023-04-25    added two functions - one for importing and process all historical data, another for the historical calibration
 # 2023-04-25    added two functions for processing nok ir data as it has a different structure to the euro ir data
-
+# 2023-04-25    added functions for processing fx data and also for calibrating the fx model
 import csv
 from csv import DictReader
 
@@ -137,7 +137,8 @@ def estimate_mrl(df_fr_current, tenor_list, kappa):
     temp1['forward rate lag'] = temp1['forward rate'].shift(1)
     temp1['step lag'] = temp1['step'].shift(1)
     temp1 = temp1[temp1['step'] > 0]
-    temp1['mrl'] = ((np.exp(temp1['kappa'])*(temp1['step'] - temp1['step lag']))*temp1['forward rate'] - temp1['forward rate lag'])/(np.exp(temp1['kappa'])*(temp1['step'] - temp1['step lag']))
+    temp1['mrl'] = ((np.exp(temp1['kappa'])*(temp1['step'] - temp1['step lag']))*temp1['forward rate'] - temp1['forward rate lag'])/\
+                   (np.exp(temp1['kappa'])*(temp1['step'] - temp1['step lag']))
 
     result = temp1
     return result
@@ -205,3 +206,63 @@ def create_df_sr_all_norway(filepath, filename, filename_nowa, spot_date):
     df_sr_all.sort_values(by=["date", "tenor"], inplace=True)
 
     return df_sr_all
+
+
+def create_df_fx(filepath, filename, spot_date):
+    file = filepath + filename
+    df_fx = pd.read_csv(file, index_col=None, header=None, skiprows=5)
+    df_fx.rename(columns={0: 'date', 1: 'value'}, inplace=True)
+    df_fx = df_fx.loc[df_fx["date"] <= spot_date]
+    df_fx["value"] = pd.to_numeric(df_fx["value"], errors="coerce")
+    df_fx["tenor"] = 0
+    df_fx.sort_values(by=['date'], inplace=True)
+
+    return df_fx
+
+def create_fx_fr_current(temp_euro, temp_nok, fx_spot, step_list):
+    temp = temp_euro.merge(temp_nok, on="tenor", how="left")
+    temp = temp[["tenor", "value_x", "value_y"]]
+    temp.rename(columns={"value_x": "value_euro", "value_y": "value_nok"}, inplace=True)
+
+    temp_selected = temp.loc[temp['tenor'].isin(step_list)]
+    temp_selected["fx multiplier"] = np.exp(
+        0.01 * (temp_selected["value_nok"] - temp_selected["value_euro"]) * temp_selected["tenor"] / 360)
+
+    temp_selected["fx forward"] = temp_selected["fx multiplier"] * fx_spot
+
+    temp_selected.rename(columns={"tenor": "step", "fx forward": "forward rate"}, inplace=True)
+    temp_selected["tenor"] = 0
+    temp_selected = temp_selected[["step", "tenor", "forward rate"]]
+
+    temp_0 = {'step': [0], 'tenor': [0], 'forward rate': [fx_spot]}
+    temp_0 = pd.DataFrame(temp_0)
+    df_fx_fr_current = pd.concat([temp_0, temp_selected], ignore_index=True)
+
+    return df_fx_fr_current
+
+def estimate_mrl_fx(df_fx_fr_current, tenor_list, kappa, sigma):
+    temp = pd.DataFrame(list(zip(tenor_list, kappa, sigma)), columns=['tenor_list', 'kappa', 'sigma'])
+    temp1 = df_fx_fr_current.merge(temp, left_on='tenor', right_on='tenor_list', how='left')
+    temp1["forward rate orig"] = temp1["forward rate"]
+    temp1["forward rate"] = np.log(temp1["forward rate orig"])
+
+    temp1["adj1"] = np.exp(temp1["kappa"] * temp1["step"] / 360) - np.exp(-1 * temp1["kappa"] * temp1["step"] / 360)
+    temp1["adj1 cumsum"] = temp1["adj1"].cumsum()
+
+    temp1["adj1 cumsum lag"] = temp1["adj1"].shift(1)
+    temp1['forward rate lag'] = temp1['forward rate'].shift(1)
+    temp1['step lag'] = temp1['step'].shift(1)
+
+    temp1 = temp1[temp1['step'] > 0]
+
+    temp1["exp adj"] = (temp1["adj1"] - temp1["adj1 cumsum lag"]) * temp1["sigma"] ** 2 / \
+                       (4 * temp1["kappa"] * (np.exp(temp1["kappa"] * temp1["step"] / 360) - np.exp(
+                           temp1["kappa"] * temp1["step lag"] / 360)))
+
+    temp1['mrl wo adj'] = ((np.exp(temp1['kappa']) * (temp1['step'] - temp1['step lag'])) * temp1['forward rate'] -
+                           temp1['forward rate lag']) / \
+                          (np.exp(temp1['kappa']) * (temp1['step'] - temp1['step lag']))
+
+    temp1['mrl'] = temp1['mrl wo adj'] - temp1['exp adj']
+
+    return temp1
