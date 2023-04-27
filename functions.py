@@ -7,6 +7,7 @@
 # 2023-04-25    added two functions - one for importing and process all historical data, another for the historical calibration
 # 2023-04-25    added two functions for processing nok ir data as it has a different structure to the euro ir data
 # 2023-04-25    added functions for processing fx data and also for calibrating the fx model
+# 2023-04-26    added functions for model calibration based on arbitrage-free theorem
 import csv
 from csv import DictReader
 
@@ -14,6 +15,11 @@ import pandas as pd
 import numpy as np
 import itertools
 
+from scipy.stats import *
+from scipy.optimize import *
+
+
+##########################################functions for zero rate model and CRR's FX rate model###############################
 def infile_2_list(filepath, filename):
     file = filepath + filename
     python_list = []
@@ -266,3 +272,44 @@ def estimate_mrl_fx(df_fx_fr_current, tenor_list, kappa, sigma):
     temp1['mrl'] = temp1['mrl wo adj'] - temp1['exp adj']
 
     return temp1
+
+##########################Functions for the 1-factor-hjm-model#############################################################
+
+def myIntegral(b, nu, t0, t1):
+    return nu ** 2 / b ** 2 * (np.exp(-b * t0) - np.exp(-b * t1)) ** 2 * (np.exp(2 * b * t0) - 1) / (2 * b)
+
+def CapVasicek(b, nu, kappa, ForwardRates, T, M, delta, Z):
+    myAns = 0
+    k = kappa[M]
+    for i in range(1, (2 * M + 2)):
+        I = myIntegral(b, nu, T[i], T[i + 1])
+        print(I)
+        d1 = (np.log(Z[i + 1] / Z[i] * (1 + delta * k)) + 0.5 * I) / np.sqrt(I)
+        d2 = (np.log(Z[i + 1] / Z[i] * (1 + delta * k)) - 0.5 * I) / np.sqrt(I)
+        cplt_i = Z[i] * norm.cdf(-d2, 0, 1) - (1 + delta * k) * Z[i + 1] * (norm.cdf(-d1, 0, 1))
+        # print(Z[i+2])
+        # print(cplt_i)
+        myAns = myAns + cplt_i
+    return myAns
+
+def BlackVega(delt, Z, fwds, T, sig, M, kap):
+    myAns = 0
+    k = kap[M]
+    for i in range(1, (2 * M + 2)):
+        # print(fwds[i])
+        # print(sig)
+        d1 = (np.log(fwds[i] / k) + 0.5 * sig ** 2 * T[i]) / (sig * np.sqrt(T[i]))
+        # d2 = d1 - sig*sqrt(T[i])
+        cplt_Vega = delt * Z[i + 1] * fwds[i] * np.sqrt(T[i]) * norm.pdf(d1, 0, 1)
+        myAns = myAns + cplt_Vega
+    return myAns
+
+def BlackCap(sig, kap, fwds, T, M, delt, Z):
+    myAns = 0
+    k = kap[M]
+    for i in range(1, (2 * M + 2)):
+        d1 = (np.log(fwds[i] / k) + 0.5 * (sig ** 2) * T[i]) / (sig * np.sqrt(T[i]))
+        d2 = d1 - sig * np.sqrt(T[i])
+        cplt_i = delt * Z[i + 1] * (fwds[i] * norm.cdf(d1, 0, 1) - k * norm.cdf(d2, 0, 1))
+        myAns = myAns + cplt_i
+    return myAns
