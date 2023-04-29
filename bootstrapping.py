@@ -1,7 +1,14 @@
 # Project: Master Thesis
 # Author: Yuanlin Dong
 # Date of creation: 2023-04-06
+# Log of changes:
+# Date          What
+# 2023-04-29    add a step to export result to excel
 
+###a refresh to clear all variables before running the script###
+from IPython import get_ipython
+get_ipython().run_line_magic('reset', '-sf')
+###a refresh to clear all variables before running the script###
 
 import pandas as pd
 import numpy as np
@@ -9,6 +16,12 @@ import datetime
 
 from datetime import date, timedelta
 from dateutil.relativedelta import relativedelta
+from functions import *
+
+# 0. set up file path
+
+filepath = '/Users/yuanlindong/Documents/python/masterthesis/input/'
+filepath_out = '/Users/yuanlindong/Documents/python/masterthesis/output/'
 
 # 1. import data
 start_date = date(2012, 10, 3)
@@ -150,13 +163,23 @@ for index, row in df_swap_rate.iterrows():
         discount_factor = (1 - row['Swap Rates']*a)/(1+row['Swap Rates']*sigma)
     df_swap_df.append((row['Tenor'], discount_factor))
 
-df_swap_df = pd.DataFrame(df_swap_df, columns=("Tenor", "Discount Factor"))
+df_swap_df = pd.DataFrame(df_swap_df, columns=("Maturity Dates", "value"))
 
-# 3. Discount Factor Curve
-df_libor_future_df = df_libor_future_df[['Maturity Dates','discount_factor']].rename(columns={'Maturity Dates':'Tenor', 'discount_factor':'Discount Factor'})
+# 3. discount factor curve
+df_libor_future_df = df_libor_future_df[['Maturity Dates','discount_factor']].rename(columns={'discount_factor':'value'})
+df_curve = pd.concat([df_libor_future_df, df_swap_df]).sort_values(['Maturity Dates']).reset_index().drop(columns=['index'])
 
-df_curve = pd.concat([df_libor_future_df, df_swap_df]).sort_values(['Tenor']).reset_index().drop(columns=['index'])
+# 4. create continuous discount curve through linear interpolation
+df_curve['tenor'] = pd.to_timedelta(df_curve['Maturity Dates'] - start_date).dt.days.astype('int')
+df_curve_daily = create_df_sr_current_daily(df_curve)
 
+
+# 5. export data to excel for further analysis
+filename = "bootstrapping_df_curve"
+file = filepath_out + filename + ".xlsx"
+with pd.ExcelWriter(file) as writer:
+    df_curve.to_excel(writer, sheet_name="discount factor table")
+    df_curve_daily.to_excel(writer, sheet_name="discount factor curve")
 
 
 

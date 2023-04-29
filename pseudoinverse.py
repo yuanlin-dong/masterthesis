@@ -2,6 +2,10 @@
 # Author: Yuanlin Dong
 # Date of creation: 2023-04-10
 
+###a refresh to clear all variables before running the script###
+from IPython import get_ipython
+get_ipython().run_line_magic('reset', '-sf')
+###a refresh to clear all variables before running the script###
 
 import pandas as pd
 import numpy as np
@@ -9,8 +13,12 @@ import scipy
 
 from datetime import date, timedelta
 from dateutil.relativedelta import relativedelta
+from functions import *
 
+# 0. set up file path
 
+filepath = '/Users/yuanlindong/Documents/python/masterthesis/input/'
+filepath_out = '/Users/yuanlindong/Documents/python/masterthesis/output/'
 
 # 1. import data
 df_bond = pd.read_excel(r'/Users/yuanlindong/Documents/python/masterthesis/input/pseudoinverse_data.xlsx', sheet_name='to_python_1')
@@ -141,3 +149,14 @@ for i in range(0,104):
 df_temp1 = pd.DataFrame(discount_curve, columns=['Discount Factor'])
 df['Tenor'] = df['cashflow_dates'].dt.date
 df_curve = pd.concat([df['Tenor'], df_temp1], axis=1)
+df_curve.rename(columns={'Tenor': 'Maturity Dates', 'Discount Factor': 'value'}, inplace=True)
+df_curve['tenor'] = pd.to_timedelta(df_curve['Maturity Dates'] - spot_date).dt.days.astype('int')
+df_curve_daily = create_df_sr_current_daily(df_curve)
+
+# 7. export data to excel for further analysis
+filename = "pi_df_curve"
+file = filepath_out + filename + ".xlsx"
+with pd.ExcelWriter(file) as writer:
+    df_curve.to_excel(writer, sheet_name="discount factor table")
+    df_curve_daily.to_excel(writer, sheet_name="discount factor curve")
+
