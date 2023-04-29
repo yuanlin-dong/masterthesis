@@ -105,7 +105,7 @@ def create_df_sr_current(dirs, filepath):
     return result
 
 def create_df_sr_current_daily(df_sr_current):
-    temp = pd.DataFrame(list(range(1,10801)), columns=['tenor'])
+    temp = pd.DataFrame(list(range(1,11000)), columns=['tenor'])
     temp1 = temp.merge(df_sr_current,on='tenor', how='left')
 
     temp1['value'] = pd.to_numeric(temp1['value'], errors='coerce')
